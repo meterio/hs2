@@ -1,4 +1,4 @@
-package node
+package hs2
 
 import (
 	"context"
