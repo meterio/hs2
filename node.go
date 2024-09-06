@@ -25,7 +25,6 @@ import (
 	"github.com/cometbft/cometbft/types"
 
 	abcitypes "github.com/cometbft/cometbft/abci/types"
-	cmttime "github.com/cometbft/cometbft/types/time"
 	"github.com/cometbft/cometbft/version"
 
 	_ "net/http/pprof" //nolint: gosec
@@ -135,9 +134,13 @@ func NewNodeWithContext(ctx context.Context,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
-
+	genDoc, err := genesisDocProvider()
+	if err != nil {
+		fmt.Println("gendoc erro: ", err)
+	}
+	_, _, _, _, abciMetrics, _, _ := metricsProvider(genDoc.ChainID)
 	// Create the proxyApp and establish connections to the ABCI app (consensus, mempool, query).
-	proxyApp, err := createAndStartProxyAppConns(clientCreator, logger, nil)
+	proxyApp, err := createAndStartProxyAppConns(clientCreator, logger, abciMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -160,18 +163,22 @@ func NewNodeWithContext(ctx context.Context,
 }
 
 func (n *Node) loop(ctx context.Context) {
-	timer := time.NewTicker(2000)
+	timer := time.NewTicker(2 * time.Second)
 	for {
 		select {
 		case <-timer.C:
 			fmt.Println("hello")
 			req := &abcitypes.RequestPrepareProposal{
 				Txs:        make([][]byte, 0),
-				MaxTxBytes: 10000,
+				MaxTxBytes: 94371840,
+				Height:     1,
 			}
-			res, err := n.proxyApp.Consensus().PrepareProposal(ctx, req)
-			fmt.Println(err)
-			fmt.Println(res)
+			fmt.Println("consnesus: ", n.proxyApp.Consensus())
+			if n.proxyApp.Consensus() != nil {
+				res, err := n.proxyApp.Consensus().PrepareProposal(ctx, req)
+				fmt.Println(err)
+				fmt.Println(res)
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -180,15 +187,17 @@ func (n *Node) loop(ctx context.Context) {
 
 // OnStart starts the Node. It implements service.Service.
 func (n *Node) OnStart() error {
-	now := cmttime.Now()
+	// now := cmttime.Now()
 	ctx := context.TODO()
-	genTime := n.genesisDoc.GenesisTime
-	if genTime.After(now) {
-		n.Logger.Info("Genesis time is in the future. Sleeping until then...", "genTime", genTime)
-		time.Sleep(genTime.Sub(now))
-	}
+	// genTime := n.genesisDoc.GenesisTime
+	// if genTime.After(now) {
+	// 	n.Logger.Info("Genesis time is in the future. Sleeping until then...", "genTime", genTime)
+	// 	time.Sleep(genTime.Sub(now))
+	// }
 
-	go n.loop(ctx)
+	reactor := NewConsensusReactor(n.proxyApp, 0)
+	go reactor.Run(ctx)
+	// go n.loop(ctx)
 	return nil
 }
 
